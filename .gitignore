@@ -8,7 +8,12 @@
 # Local baseline automation logs.
 /baseline-runs/
 
+# Local oh-my-codex state.
+/.omx/
+
 # Local editor and OS noise.
 .DS_Store
+__pycache__/
+*.py[cod]
 *.swp
 *~

@@ -36,14 +36,14 @@ repo에 포함되는 관리 대상이다.
   - 테스트 파일 수정 금지, 불필요한 리팩터링 금지, 정답 자료 확인 금지 원칙을
     포함한다.
 
-- `auto_codex_prompt.md`
+- `codex_baseline_prompt.md`
   - 자동 baseline 실행에서 `codex exec`에 전달하는 프롬프트다.
   - 사람 승인 대기 없이 한 번의 비대화 실행으로 issue를 읽고, production code를
     수정하고, 가능한 범위의 검증을 수행하도록 지시한다.
   - gold patch, test patch, 정답 PR 확인 금지와 테스트 파일 수정 금지 원칙을
     포함한다.
 
-- `auto_solve_instances.sh`
+- `run_codex_baseline.sh`
   - 단일 프롬프트 자동 baseline을 실행한다.
   - 첫 번째 인자로 실행할 문제 개수 `COUNT`를 받는다.
   - `START_INDEX`로 dataset 시작 위치를 바꿀 수 있다.
@@ -52,9 +52,66 @@ repo에 포함되는 관리 대상이다.
   - 기본값으로 harness 평가까지 실행한다. `EVALUATE=0`이면 Codex 실행과 patch
     저장까지만 수행한다.
   - `DRY_RUN=1`이면 실행 대상 instance id만 출력하고 종료한다.
-  - 결과는 `PROJECT_ROOT/baseline-runs/auto_<timestamp>/` 아래에 저장한다.
+  - 결과는 `PROJECT_ROOT/baseline-runs/codex_<timestamp>/` 아래에 저장한다.
   - `summary.tsv`에는 instance id, Codex 실행 상태, 평가 상태, resolved 여부,
-    로그 위치가 기록된다.
+    Codex 실행 시간, token 사용량, 비용 추정치, 로그 위치가 기록된다.
+  - 비용 추정은 `codex exec --json`의 `turn.completed.usage`를 파싱해서 계산한다.
+  - reasoning output token은 output token 비용에 속하는 것으로 보고 기록한다.
+  - 기본 비용 추정 모델은 `COST_MODEL=${MODEL:-gpt-5.5}`다.
+  - 지원 모델 기본 단가는 `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`,
+    `gpt-5.3-codex`, `gpt-5.2`다.
+  - 다른 모델이나 다른 단가를 쓰려면 `CODEX_INPUT_USD_PER_1M`,
+    `CODEX_CACHED_INPUT_USD_PER_1M`, `CODEX_OUTPUT_USD_PER_1M`를 지정한다.
+
+  사용 예:
+
+  ```bash
+  # 앞에서부터 5개 instance를 자동 풀이하고 기본값으로 harness 평가까지 실행한다.
+  scripts/run_codex_baseline.sh 5
+
+  # dataset index 20부터 10개 instance를 자동 풀이한다.
+  START_INDEX=20 scripts/run_codex_baseline.sh 10
+
+  # Codex 실행과 patch 저장까지만 수행하고 harness 평가는 건너뛴다.
+  EVALUATE=0 scripts/run_codex_baseline.sh 10
+
+  # 실행 대상 instance id만 확인하고 setup, Codex 실행, 평가는 하지 않는다.
+  DRY_RUN=1 scripts/run_codex_baseline.sh 5
+
+  # 지정한 Codex model로 앞에서부터 5개 instance를 자동 풀이한다.
+  MODEL="gpt-5.4" scripts/run_codex_baseline.sh 5
+
+  # 단가를 직접 지정해서 비용을 추정한다.
+  CODEX_INPUT_USD_PER_1M=2.5 CODEX_CACHED_INPUT_USD_PER_1M=0.25 CODEX_OUTPUT_USD_PER_1M=15 scripts/run_codex_baseline.sh 5
+  ```
+
+  결과 구조:
+
+  ```text
+  PROJECT_ROOT/baseline-runs/codex_<timestamp>/
+    instance_ids.txt
+    summary.tsv
+    <INSTANCE_ID>/
+      setup.log
+      codex.log
+      codex_final.md
+      codex_usage.json
+      model.patch
+      eval.log
+    instances/
+      <INSTANCE_ID>/
+  ```
+
+  `summary.tsv`에서 `resolved=false` 또는 `eval_status=failed`인 문제를 골라
+  사람이 Codex와 함께 다시 풀면 된다. 이 문제들이 단일 프롬프트 baseline으로는
+  해결되지 않은 학습 후보가 된다.
+
+- `extract_codex_usage.py`
+  - `codex exec --json`이 출력한 JSONL 로그에서 마지막 `turn.completed.usage`를
+    읽는다.
+  - input, cached input, output, reasoning output token 수를 추출한다.
+  - 모델별 기본 단가 또는 환경변수로 전달한 단가를 사용해 USD 비용 추정치를
+    계산한다.
 
 - `eval_patch.sh`
   - `INSTANCE_ID` 환경변수가 필요하다.
