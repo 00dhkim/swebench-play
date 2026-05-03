@@ -88,31 +88,15 @@ git clone https://github.com/00dhkim/swebench-play.git
 cd swebench-play
 ```
 
-그 다음 공식 SWE-bench 저장소와 Python venv를 준비한다.
+그 다음 준비 스크립트를 한 번 실행한다.
 
 ```bash
-git clone https://github.com/SWE-bench/SWE-bench.git SWE-bench
-
-cd SWE-bench
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip setuptools wheel
-python -m pip install -e .
+scripts/bootstrap.sh
 ```
 
-이미 `SWE-bench/`와 `.venv`가 준비되어 있다면 설치 과정은 다시 하지 않아도 된다.
-단, PC가 바뀌면 `.venv`는 새 환경에서 다시 만드는 편이 안전하다.
-
-설치 확인:
-
-```bash
-cd SWE-bench
-source .venv/bin/activate
-python - <<'PY'
-import swebench
-print("swebench import ok")
-PY
-```
+이 스크립트는 공식 `SWE-bench/` 저장소 clone, `.venv` 생성, 패키지 설치,
+`swebench` import 확인을 순서대로 수행한다. 이미 `SWE-bench/`와 `.venv`가
+있으면 재사용한다. 단, PC가 바뀌면 `.venv`는 새 환경에서 다시 만드는 편이 안전하다.
 
 ## 사용 흐름
 

@@ -9,6 +9,13 @@ repo에 포함되는 관리 대상이다.
 
 ## 파일 목록
 
+- `bootstrap.sh`
+  - 공식 SWE-bench 저장소를 `PROJECT_ROOT/SWE-bench` 아래에 clone한다.
+  - `SWE-bench/.venv`가 없으면 새 Python virtualenv를 만든다.
+  - `pip`, `setuptools`, `wheel`을 갱신하고 SWE-bench를 editable install한다.
+  - 설치 후 `swebench` import 확인을 실행한다.
+  - `SWE_BENCH_REPO_URL` 환경변수로 clone URL을 바꿀 수 있다.
+
 - `list_instances.py`
   - 기본값으로 `princeton-nlp/SWE-bench_Verified`의 `test` split을 로드한다.
   - 앞에서부터 N개 instance를 출력한다.

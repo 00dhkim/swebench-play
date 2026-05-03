@@ -8,8 +8,9 @@
 # Local baseline automation logs.
 /baseline-runs/
 
-# Local oh-my-codex state.
+# Local oh-my-codex, oh-my-claudecode state.
 /.omx/
+/.omc/
 
 # Local editor and OS noise.
 .DS_Store
