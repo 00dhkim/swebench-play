@@ -54,10 +54,20 @@ repo에 포함되는 관리 대상이다.
   - 단일 프롬프트 자동 baseline을 실행한다.
   - 첫 번째 인자로 실행할 문제 개수 `COUNT`를 받는다.
   - `START_INDEX`로 dataset 시작 위치를 바꿀 수 있다.
-  - 각 instance에 대해 `setup_instance.sh`, `codex exec`, `eval_patch.sh`를
-    순차 실행한다.
-  - 기본값으로 harness 평가까지 실행한다. `EVALUATE=0`이면 Codex 실행과 patch
-    저장까지만 수행한다.
+  - 각 instance에 대해 `setup_instance.sh`, `codex exec`, patch 저장을 순차
+    실행한 뒤, 기본값으로 harness 평가는 마지막에 batch로 한 번 실행한다.
+  - batch 평가는 SWE-bench harness의 `--max_workers`를 사용한다.
+    `MAX_WORKERS` 기본값은 `4`다.
+  - `EVALUATE=0`이면 Codex 실행과 patch 저장까지만 수행한다.
+  - Codex quota/rate limit 계열 실패가 감지되면 기본값으로 Codex loop를 멈춘다.
+    이때 `codex_status=codex_limit_failed`가 기록되고, 이미 생성된 patch 후보는
+    batch 평가한다.
+  - `RESUME_RUN_DIR`로 기존 run directory를 이어서 실행할 수 있다.
+    이미 `summary.tsv`에 기록된 instance는 건너뛴다.
+  - `RETRY_FAILED=1`을 함께 지정하면 resume 시 `failed`, `setup_failed`,
+    `codex_limit_failed` row를 다시 시도한다.
+  - 이미 `eval_status=ok`인 row는 기본값으로 재평가하지 않는다.
+    다시 평가하려면 `REEVALUATE=1`을 지정한다.
   - `DRY_RUN=1`이면 실행 대상 instance id만 출력하고 종료한다.
   - 결과는 `PROJECT_ROOT/baseline-runs/codex_<timestamp>/` 아래에 저장한다.
   - `summary.tsv`에는 instance id, Codex 실행 상태, 평가 상태, resolved 여부,
@@ -79,8 +89,20 @@ repo에 포함되는 관리 대상이다.
   # dataset index 20부터 10개 instance를 자동 풀이한다.
   START_INDEX=20 scripts/run_codex_baseline.sh 10
 
+  # harness 평가 worker 수를 8로 올려 batch 평가한다.
+  MAX_WORKERS=8 scripts/run_codex_baseline.sh 50
+
   # Codex 실행과 patch 저장까지만 수행하고 harness 평가는 건너뛴다.
   EVALUATE=0 scripts/run_codex_baseline.sh 10
+
+  # 중단된 baseline run을 이어서 실행한다.
+  RESUME_RUN_DIR=baseline-runs/codex_20260503T100502Z scripts/run_codex_baseline.sh 500
+
+  # Codex 한도 실패 등 실패 row를 다시 시도하며 이어서 실행한다.
+  RESUME_RUN_DIR=baseline-runs/codex_20260503T100502Z RETRY_FAILED=1 scripts/run_codex_baseline.sh 500
+
+  # 이미 harness 평가가 끝난 row까지 다시 평가한다.
+  RESUME_RUN_DIR=baseline-runs/codex_20260503T100502Z REEVALUATE=1 scripts/run_codex_baseline.sh 500
 
   # 실행 대상 instance id만 확인하고 setup, Codex 실행, 평가는 하지 않는다.
   DRY_RUN=1 scripts/run_codex_baseline.sh 5
@@ -105,6 +127,13 @@ repo에 포함되는 관리 대상이다.
       codex_usage.json
       model.patch
       eval.log
+    batch_eval/
+      <RUN_ID>/
+        predictions.jsonl
+        candidates.tsv
+        eval_updates.tsv
+        eval.log
+        report/
     instances/
       <INSTANCE_ID>/
   ```
