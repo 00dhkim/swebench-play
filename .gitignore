@@ -1,0 +1,11 @@
+# External dependency cloned during setup.
+/SWE-bench/
+
+# Per-instance solve repositories and generated issue files.
+/instances/*
+!/instances/.gitkeep
+
+# Local editor and OS noise.
+.DS_Store
+*.swp
+*~
