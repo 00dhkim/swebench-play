@@ -6,7 +6,7 @@ SPLIT="${SPLIT:-test}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${SWE_PLAY_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 SWE_BENCH_DIR="$ROOT_DIR/SWE-bench"
-INSTANCES_DIR="$ROOT_DIR/instances"
+INSTANCES_DIR="${INSTANCES_DIR:-$ROOT_DIR/instances}"
 MODEL_NAME="human-codex-practice"
 
 if [[ -z "${INSTANCE_ID:-}" ]]; then

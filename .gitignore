@@ -5,6 +5,9 @@
 /instances/*
 !/instances/.gitkeep
 
+# Local baseline automation logs.
+/baseline-runs/
+
 # Local editor and OS noise.
 .DS_Store
 *.swp

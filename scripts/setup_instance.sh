@@ -6,7 +6,7 @@ SPLIT="${SPLIT:-test}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${SWE_PLAY_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 SWE_BENCH_DIR="$ROOT_DIR/SWE-bench"
-INSTANCES_DIR="$ROOT_DIR/instances"
+INSTANCES_DIR="${INSTANCES_DIR:-$ROOT_DIR/instances}"
 
 if [[ -z "${INSTANCE_ID:-}" ]]; then
   echo "ERROR: INSTANCE_ID is required." >&2
@@ -82,6 +82,7 @@ fi
 
 git -C "$INSTANCE_DIR" fetch --all --tags --prune
 git -C "$INSTANCE_DIR" checkout --detach "$BASE_COMMIT"
+git -C "$INSTANCE_DIR" reset --hard "$BASE_COMMIT"
 git -C "$INSTANCE_DIR" clean -fdx
 cp "$TMP_ISSUE_FILE" "$ISSUE_FILE"
 cp "$ISSUE_FILE" "$INSTANCE_DIR/SWE_ISSUE.md"

@@ -160,6 +160,71 @@ cd SWE-bench
 export SWE_PLAY_ROOT="/path/to/swebench-play"
 ```
 
+## 자동 baseline 실행
+
+단일 프롬프트로 바로 풀리는 문제는 학습용으로 적합하지 않을 수 있다. 그래서
+먼저 자동 baseline을 실행해 보고, harness에서 실패한 문제를 사람이 Codex와 함께
+풀 대상으로 삼는다.
+
+자동 baseline은 다음 순서로 동작한다.
+
+1. dataset 앞쪽에서 지정한 개수만큼 instance id를 고른다.
+2. 각 instance repo를 `baseline-runs/auto_<timestamp>/instances/` 아래에 준비한다.
+3. `auto_codex_prompt.md`를 사용해 `codex exec`를 한 번 실행한다.
+4. 생성된 `git diff`를 저장한다.
+5. 기본값으로 SWE-bench harness 평가까지 실행한다.
+6. 결과 요약을 `baseline-runs/` 아래에 저장한다.
+
+예시:
+
+```bash
+cd PROJECT_ROOT
+scripts/auto_solve_instances.sh 5
+```
+
+20번째 instance부터 10개를 실행하려면:
+
+```bash
+START_INDEX=20 scripts/auto_solve_instances.sh 10
+```
+
+Codex 실행만 하고 harness 평가는 나중에 하고 싶으면:
+
+```bash
+EVALUATE=0 scripts/auto_solve_instances.sh 10
+```
+
+실행 대상만 확인하고 실제 setup, Codex 실행, 평가는 건너뛰려면:
+
+```bash
+DRY_RUN=1 scripts/auto_solve_instances.sh 5
+```
+
+특정 Codex model을 지정하려면:
+
+```bash
+MODEL="gpt-5.4" scripts/auto_solve_instances.sh 5
+```
+
+자동 baseline 결과는 다음 위치에 생긴다.
+
+```text
+PROJECT_ROOT/baseline-runs/auto_<timestamp>/
+  instance_ids.txt
+  summary.tsv
+  <INSTANCE_ID>/
+    setup.log
+    codex.log
+    codex_final.md
+    model.patch
+    eval.log
+  instances/
+    <INSTANCE_ID>/
+```
+
+`summary.tsv`에서 `resolved=false` 또는 `eval_status=failed`인 문제를 골라
+사람이 Codex와 함께 다시 푸는 방식으로 사용한다.
+
 ## 평가 결과와 로그
 
 `eval_patch.sh`는 실행할 때마다 run id를 만들고, patch와 prediction JSONL을
@@ -185,4 +250,5 @@ export SWE_PLAY_ROOT="/path/to/swebench-play"
 - gold patch, test patch, 정답 PR은 워크플로에 포함하지 않는다.
 - `eval_patch.sh`는 흔한 테스트 파일 경로가 diff에 포함되면 평가를 중단한다.
 - 이번 환경은 사람이 Codex와 함께 한 문제씩 푸는 연습용이다. 여러 문제를
-  단일 프롬프트로 자동 풀이하는 baseline 스크립트는 아직 만들지 않았다.
+  단일 프롬프트로 자동 풀이한 결과는 쉬운 문제를 걸러내기 위한 baseline으로만
+  사용한다.
