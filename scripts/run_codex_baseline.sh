@@ -12,6 +12,7 @@ MODEL="${MODEL:-}"
 COST_MODEL="${COST_MODEL:-${MODEL:-gpt-5.5}}"
 START_INDEX="${START_INDEX:-0}"
 EVALUATE="${EVALUATE:-1}"
+EVAL_ONLY="${EVAL_ONLY:-0}"
 MAX_WORKERS="${MAX_WORKERS:-4}"
 DRY_RUN="${DRY_RUN:-0}"
 RESUME_RUN_DIR="${RESUME_RUN_DIR:-}"
@@ -30,6 +31,7 @@ Environment variables:
   SPLIT                 Default: test
   START_INDEX           Dataset index to start from. Default: 0
   EVALUATE              Run SWE-bench harness after Codex attempts. Default: 1
+  EVAL_ONLY             Skip setup/Codex and evaluate existing summary rows only. Default: 0
   MAX_WORKERS           SWE-bench harness parallel workers. Default: 4
   MODEL                 Optional Codex model override
   MODEL_NAME            Harness model_name_or_path. Default: human-codex-practice
@@ -50,6 +52,7 @@ Cost estimate overrides:
 Example:
   scripts/run_codex_baseline.sh 5
   START_INDEX=20 EVALUATE=0 scripts/run_codex_baseline.sh 10
+  RESUME_RUN_DIR=baseline-runs/codex_20260503T100502Z EVAL_ONLY=1 scripts/run_codex_baseline.sh 500
   MAX_WORKERS=8 scripts/run_codex_baseline.sh 500
   RESUME_RUN_DIR=baseline-runs/codex_20260503T100502Z scripts/run_codex_baseline.sh 500
   DRY_RUN=1 scripts/run_codex_baseline.sh 5
@@ -332,7 +335,7 @@ if [[ ! -d "$SWE_BENCH_DIR/.venv" ]]; then
   exit 2
 fi
 
-if ! command -v codex >/dev/null 2>&1; then
+if [[ "$EVAL_ONLY" != "1" ]] && ! command -v codex >/dev/null 2>&1; then
   echo "ERROR: codex CLI not found in PATH." >&2
   exit 2
 fi
@@ -349,6 +352,9 @@ if [[ -n "$RESUME_RUN_DIR" ]]; then
     echo "ERROR: RESUME_RUN_DIR not found: $run_dir" >&2
     exit 2
   fi
+elif [[ "$EVAL_ONLY" == "1" ]]; then
+  echo "ERROR: EVAL_ONLY=1 requires RESUME_RUN_DIR." >&2
+  exit 2
 else
   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
   run_dir="$BASELINE_DIR/codex_${timestamp}"
@@ -359,6 +365,11 @@ ids_file="$run_dir/instance_ids.txt"
 summary_file="$run_dir/summary.tsv"
 
 mkdir -p "$run_dir" "$auto_instances_dir"
+
+if [[ "$EVAL_ONLY" == "1" && ! -f "$summary_file" ]]; then
+  echo "ERROR: EVAL_ONLY=1 requires existing summary.tsv: $summary_file" >&2
+  exit 2
+fi
 
 if [[ -z "$RESUME_RUN_DIR" || ! -f "$ids_file" ]]; then
   DATASET_NAME="$DATASET_NAME" SPLIT="$SPLIT" START_INDEX="$START_INDEX" COUNT="$COUNT" python - <<'PY' > "$ids_file"
@@ -397,6 +408,7 @@ echo "Start index: $START_INDEX"
 echo "Count requested: $COUNT"
 echo "Run directory: $run_dir"
 echo "Evaluate: $EVALUATE"
+echo "Eval only: $EVAL_ONLY"
 if [[ "$EVALUATE" == "1" ]]; then
   echo "Evaluation mode: batch after Codex attempts"
   echo "Max workers: $MAX_WORKERS"
@@ -416,112 +428,120 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-codex_limit_seen=0
-while IFS= read -r instance_id; do
-  [[ -n "$instance_id" ]] || continue
+if [[ "$EVAL_ONLY" == "1" ]]; then
+  if [[ "$EVALUATE" != "1" ]]; then
+    echo "ERROR: EVAL_ONLY=1 requires EVALUATE=1." >&2
+    exit 2
+  fi
+  echo "EVAL_ONLY=1; skipping setup and Codex execution."
+else
+  codex_limit_seen=0
+  while IFS= read -r instance_id; do
+    [[ -n "$instance_id" ]] || continue
 
-  if summary_has_instance "$summary_file" "$instance_id"; then
-    echo "==> $instance_id: skipped existing summary row"
-    continue
-  fi
-  if [[ "$RETRY_FAILED" == "1" ]]; then
-    remove_summary_instance "$summary_file" "$instance_id"
-  fi
+    if summary_has_instance "$summary_file" "$instance_id"; then
+      echo "==> $instance_id: skipped existing summary row"
+      continue
+    fi
+    if [[ "$RETRY_FAILED" == "1" ]]; then
+      remove_summary_instance "$summary_file" "$instance_id"
+    fi
 
-  instance_dir="$auto_instances_dir/$instance_id"
-  instance_run_dir="$run_dir/$instance_id"
-  mkdir -p "$instance_run_dir"
-  codex_log="$instance_run_dir/codex.log"
-  codex_final="$instance_run_dir/codex_final.md"
-  codex_usage="$instance_run_dir/codex_usage.json"
-  setup_log="$instance_run_dir/setup.log"
-  eval_log="$instance_run_dir/eval.log"
-  patch_file="$instance_run_dir/model.patch"
-  codex_seconds=""
-  input_tokens="0"
-  cached_input_tokens="0"
-  output_tokens="0"
-  reasoning_output_tokens="0"
-  cost_estimate_usd=""
-  cost_method="not_measured"
+    instance_dir="$auto_instances_dir/$instance_id"
+    instance_run_dir="$run_dir/$instance_id"
+    mkdir -p "$instance_run_dir"
+    codex_log="$instance_run_dir/codex.log"
+    codex_final="$instance_run_dir/codex_final.md"
+    codex_usage="$instance_run_dir/codex_usage.json"
+    setup_log="$instance_run_dir/setup.log"
+    eval_log="$instance_run_dir/eval.log"
+    patch_file="$instance_run_dir/model.patch"
+    codex_seconds=""
+    input_tokens="0"
+    cached_input_tokens="0"
+    output_tokens="0"
+    reasoning_output_tokens="0"
+    cost_estimate_usd=""
+    cost_method="not_measured"
 
-  echo "==> $instance_id: setup"
-  if ! INSTANCE_ID="$instance_id" DATASET_NAME="$DATASET_NAME" SPLIT="$SPLIT" INSTANCES_DIR="$auto_instances_dir" "$SCRIPT_DIR/setup_instance.sh" >"$setup_log" 2>&1; then
-    append_summary_row "$summary_file" "$instance_id" "setup_failed" "not_run" "unknown" "$codex_seconds" "$input_tokens" "$cached_input_tokens" "$output_tokens" "$reasoning_output_tokens" "$cost_estimate_usd" "$cost_method" "$instance_dir" "$codex_log" "$eval_log"
-    echo "    setup failed. See $setup_log"
-    continue
-  fi
+    echo "==> $instance_id: setup"
+    if ! INSTANCE_ID="$instance_id" DATASET_NAME="$DATASET_NAME" SPLIT="$SPLIT" INSTANCES_DIR="$auto_instances_dir" "$SCRIPT_DIR/setup_instance.sh" >"$setup_log" 2>&1; then
+      append_summary_row "$summary_file" "$instance_id" "setup_failed" "not_run" "unknown" "$codex_seconds" "$input_tokens" "$cached_input_tokens" "$output_tokens" "$reasoning_output_tokens" "$cost_estimate_usd" "$cost_method" "$instance_dir" "$codex_log" "$eval_log"
+      echo "    setup failed. See $setup_log"
+      continue
+    fi
 
-  echo "==> $instance_id: codex exec"
-  codex_started_at="$(date +%s)"
-  codex_args=(
-    exec
-    --json
-    --cd "$instance_dir"
-    --dangerously-bypass-approvals-and-sandbox
-    --output-last-message "$codex_final"
-  )
-  if [[ -n "$MODEL" ]]; then
-    codex_args+=(--model "$MODEL")
-  fi
+    echo "==> $instance_id: codex exec"
+    codex_started_at="$(date +%s)"
+    codex_args=(
+      exec
+      --json
+      --cd "$instance_dir"
+      --dangerously-bypass-approvals-and-sandbox
+      --output-last-message "$codex_final"
+    )
+    if [[ -n "$MODEL" ]]; then
+      codex_args+=(--model "$MODEL")
+    fi
 
-  if codex "${codex_args[@]}" - < "$PROMPT_FILE" >"$codex_log" 2>&1; then
-    codex_status="ok"
-  elif detect_codex_limit_error "$codex_log"; then
-    codex_status="codex_limit_failed"
-    codex_limit_seen=1
-  else
-    codex_status="failed"
-  fi
-  codex_finished_at="$(date +%s)"
-  codex_seconds="$((codex_finished_at - codex_started_at))"
+    if codex "${codex_args[@]}" - < "$PROMPT_FILE" >"$codex_log" 2>&1; then
+      codex_status="ok"
+    elif detect_codex_limit_error "$codex_log"; then
+      codex_status="codex_limit_failed"
+      codex_limit_seen=1
+    else
+      codex_status="failed"
+    fi
+    codex_finished_at="$(date +%s)"
+    codex_seconds="$((codex_finished_at - codex_started_at))"
 
-  usage_args=()
-  if [[ -n "${CODEX_INPUT_USD_PER_1M:-}" ]]; then
-    usage_args+=(--input-usd-per-1m "$CODEX_INPUT_USD_PER_1M")
-  fi
-  if [[ -n "${CODEX_CACHED_INPUT_USD_PER_1M:-}" ]]; then
-    usage_args+=(--cached-input-usd-per-1m "$CODEX_CACHED_INPUT_USD_PER_1M")
-  fi
-  if [[ -n "${CODEX_OUTPUT_USD_PER_1M:-}" ]]; then
-    usage_args+=(--output-usd-per-1m "$CODEX_OUTPUT_USD_PER_1M")
-  fi
+    usage_args=()
+    if [[ -n "${CODEX_INPUT_USD_PER_1M:-}" ]]; then
+      usage_args+=(--input-usd-per-1m "$CODEX_INPUT_USD_PER_1M")
+    fi
+    if [[ -n "${CODEX_CACHED_INPUT_USD_PER_1M:-}" ]]; then
+      usage_args+=(--cached-input-usd-per-1m "$CODEX_CACHED_INPUT_USD_PER_1M")
+    fi
+    if [[ -n "${CODEX_OUTPUT_USD_PER_1M:-}" ]]; then
+      usage_args+=(--output-usd-per-1m "$CODEX_OUTPUT_USD_PER_1M")
+    fi
 
-  if python "$SCRIPT_DIR/extract_codex_usage.py" \
-      --jsonl "$codex_log" \
-      --output "$codex_usage" \
-      --model "$COST_MODEL" \
-      "${usage_args[@]}"; then
-    input_tokens="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["input_tokens"])' "$codex_usage")"
-    cached_input_tokens="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["cached_input_tokens"])' "$codex_usage")"
-    output_tokens="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["output_tokens"])' "$codex_usage")"
-    reasoning_output_tokens="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["reasoning_output_tokens"])' "$codex_usage")"
-    cost_estimate_usd="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["cost_estimate_usd"])' "$codex_usage")"
-    cost_method="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["cost_method"])' "$codex_usage")"
-  fi
+    if python "$SCRIPT_DIR/extract_codex_usage.py" \
+        --jsonl "$codex_log" \
+        --output "$codex_usage" \
+        --model "$COST_MODEL" \
+        "${usage_args[@]}"; then
+      input_tokens="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["input_tokens"])' "$codex_usage")"
+      cached_input_tokens="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["cached_input_tokens"])' "$codex_usage")"
+      output_tokens="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["output_tokens"])' "$codex_usage")"
+      reasoning_output_tokens="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["reasoning_output_tokens"])' "$codex_usage")"
+      cost_estimate_usd="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["cost_estimate_usd"])' "$codex_usage")"
+      cost_method="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["cost_method"])' "$codex_usage")"
+    fi
 
-  if [[ -d "$instance_dir/.git" ]]; then
-    git -C "$instance_dir" diff --binary > "$patch_file"
-  else
-    : > "$patch_file"
-  fi
+    if [[ -d "$instance_dir/.git" ]]; then
+      git -C "$instance_dir" diff --binary > "$patch_file"
+    else
+      : > "$patch_file"
+    fi
 
-  eval_status="not_run"
-  resolved="unknown"
-  if [[ "$codex_status" != "ok" ]]; then
-    eval_status="skipped_codex_failed"
-  elif [[ ! -s "$patch_file" ]]; then
-    eval_status="skipped_empty_patch"
-  fi
+    eval_status="not_run"
+    resolved="unknown"
+    if [[ "$codex_status" != "ok" ]]; then
+      eval_status="skipped_codex_failed"
+    elif [[ ! -s "$patch_file" ]]; then
+      eval_status="skipped_empty_patch"
+    fi
 
-  append_summary_row "$summary_file" "$instance_id" "$codex_status" "$eval_status" "$resolved" "$codex_seconds" "$input_tokens" "$cached_input_tokens" "$output_tokens" "$reasoning_output_tokens" "$cost_estimate_usd" "$cost_method" "$instance_dir" "$codex_log" "$eval_log"
-  echo "    codex=$codex_status eval=$eval_status resolved=$resolved seconds=$codex_seconds tokens_in=$input_tokens tokens_cached=$cached_input_tokens tokens_out=$output_tokens cost_estimate_usd=$cost_estimate_usd"
+    append_summary_row "$summary_file" "$instance_id" "$codex_status" "$eval_status" "$resolved" "$codex_seconds" "$input_tokens" "$cached_input_tokens" "$output_tokens" "$reasoning_output_tokens" "$cost_estimate_usd" "$cost_method" "$instance_dir" "$codex_log" "$eval_log"
+    echo "    codex=$codex_status eval=$eval_status resolved=$resolved seconds=$codex_seconds tokens_in=$input_tokens tokens_cached=$cached_input_tokens tokens_out=$output_tokens cost_estimate_usd=$cost_estimate_usd"
 
-  if [[ "$codex_limit_seen" == "1" && "$STOP_ON_CODEX_LIMIT" == "1" ]]; then
-    echo "    Codex quota/rate-limit failure detected; stopping Codex loop. Resume later with RESUME_RUN_DIR=$run_dir RETRY_FAILED=1."
-    break
-  fi
-done < "$ids_file"
+    if [[ "$codex_limit_seen" == "1" && "$STOP_ON_CODEX_LIMIT" == "1" ]]; then
+      echo "    Codex quota/rate-limit failure detected; stopping Codex loop. Resume later with RESUME_RUN_DIR=$run_dir RETRY_FAILED=1."
+      break
+    fi
+  done < "$ids_file"
+fi
 
 if [[ "$EVALUATE" == "1" ]]; then
   run_batch_evaluation "$run_dir" "$summary_file"

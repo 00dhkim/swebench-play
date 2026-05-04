@@ -59,6 +59,9 @@ repo에 포함되는 관리 대상이다.
   - batch 평가는 SWE-bench harness의 `--max_workers`를 사용한다.
     `MAX_WORKERS` 기본값은 `4`다.
   - `EVALUATE=0`이면 Codex 실행과 patch 저장까지만 수행한다.
+  - `EVAL_ONLY=1`이면 기존 run directory의 `summary.tsv`에 기록된 row만
+    대상으로 setup과 Codex 실행을 건너뛰고 batch 평가만 실행한다.
+    이 옵션은 `RESUME_RUN_DIR`와 함께 써야 한다.
   - Codex quota/rate limit 계열 실패가 감지되면 기본값으로 Codex loop를 멈춘다.
     이때 `codex_status=codex_limit_failed`가 기록되고, 이미 생성된 patch 후보는
     batch 평가한다.
@@ -94,6 +97,9 @@ repo에 포함되는 관리 대상이다.
 
   # Codex 실행과 patch 저장까지만 수행하고 harness 평가는 건너뛴다.
   EVALUATE=0 scripts/run_codex_baseline.sh 10
+
+  # (재개하는 경우) 기존 run에서 추가 codex exec는 하지 않고, 지금까지 Codex 실행이 끝난 row만 harness 평가한다.
+  RESUME_RUN_DIR=baseline-runs/codex_20260503T100502Z EVAL_ONLY=1 scripts/run_codex_baseline.sh 500
 
   # 중단된 baseline run을 이어서 실행한다.
   RESUME_RUN_DIR=baseline-runs/codex_20260503T100502Z scripts/run_codex_baseline.sh 500
